@@ -48,6 +48,8 @@ header {
   height: 52px;
   width: auto;
   flex-shrink: 0;
+  mix-blend-mode: screen;
+  filter: brightness(1.1);
 }
 .header-text { text-align: left; }
 header h1 {
@@ -885,10 +887,13 @@ function renderIdleReel() {
     reel.innerHTML = `<div class="slot-item" style="color:var(--muted)"><span class="emoji">🍽️</span>Ei ravintoloita valittuna</div>`;
     return;
   }
-  // Show up to 5 random restaurants from pool in idle state
-  const sample = [...pool].sort(() => Math.random() - 0.5).slice(0, 5);
+  // Fill reel with enough items to show 5 visible + overflow above/below (no black)
+  const repeated = [];
+  while(repeated.length < 11) repeated.push(...pool);
+  const sample = repeated.slice(0, 11);
   reel.style.transition = 'none';
-  reel.style.transform = 'translateY(0)';
+  // Offset so middle item (index 5) sits in center: translateY = -(5 * 52) = -260
+  reel.style.transform = 'translateY(-260px)';
   reel.innerHTML = sample.map((r, i) => {
     const c = COLORS[i % COLORS.length];
     return `<div class="slot-item" style="background:${c.bg};color:${c.color}"><span class="emoji">🍽️</span>${escHtml(r.name)}</div>`;
@@ -1112,23 +1117,34 @@ async function spin() {
   const winner = pool[Math.floor(Math.random()*pool.length)];
   const reel = document.getElementById('slotReel');
 
-  // Build reel: random items + winner last
-  const count = 28 + Math.floor(Math.random()*10);
-  const items = Array.from({length:count}, () => pool[Math.floor(Math.random()*pool.length)]);
-  items.push(winner);
+  // Build reel: prefix (fills visible area above start) + scroll items + winner + suffix (fills below)
+  const PREFIX = 6; // items shown above the initial scroll position
+  const SCROLL_COUNT = 28 + Math.floor(Math.random()*10);
+  const SUFFIX = 5;
+
+  const prefix  = Array.from({length: PREFIX},  () => pool[Math.floor(Math.random()*pool.length)]);
+  const middle  = Array.from({length: SCROLL_COUNT}, () => pool[Math.floor(Math.random()*pool.length)]);
+  const suffix  = Array.from({length: SUFFIX},  () => pool[Math.floor(Math.random()*pool.length)]);
+  const items   = [...prefix, ...middle, winner, ...suffix];
 
   reel.style.transition = 'none';
-  reel.style.transform = 'translateY(0)';
   reel.innerHTML = items.map((r,i) => {
     const c = COLORS[i % COLORS.length];
     return `<div class="slot-item" style="background:${c.bg};color:${c.color}"><span class="emoji">🍽️</span>${escHtml(r.name)}</div>`;
   }).join('');
 
+  // Start position: show prefix items centered (item at index PREFIX-3 in center)
+  // center of window = 134px from top of window
+  // item center at index i = padding(108) + i*52 + 26
+  // We want prefix start visible: translate so index 0 is above viewport
+  const startY = -(108 + (PREFIX - 3) * ITEM_H + 26 - 134);
+  reel.style.transform = `translateY(${startY}px)`;
+
   await new Promise(res=>setTimeout(res,60));
 
-  // Window height 268px, center = 134px. Item center = padding(108) + idx*52 + 22
-  const targetIdx = items.length - 1;
-  const targetY = -(108 + targetIdx * ITEM_H + 22 - 134);
+  // Target: winner (at index PREFIX + SCROLL_COUNT) centered
+  const winnerIdx = PREFIX + SCROLL_COUNT;
+  const targetY = -(108 + winnerIdx * ITEM_H + 26 - 134);
   reel.style.transition = 'transform 6s cubic-bezier(0.08,0.6,0.2,1)';
   reel.style.transform = `translateY(${targetY}px)`;
 
