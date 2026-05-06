@@ -65,11 +65,19 @@ async function fetchFromOverpass() {
 function httpsPost(hostname, urlPath, body) {
   return new Promise((resolve, reject) => {
     const req = https.request(
-      { hostname, path: urlPath, method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body) } },
+      { hostname, path: urlPath, method: 'POST', headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(body),
+        'User-Agent': 'lounashyrra/1.0 (lunch roulette app; contact via github.com/KuiluTrolli780)',
+        'Accept': 'application/json',
+      }},
       (res) => {
         let data = '';
         res.on('data', chunk => data += chunk);
-        res.on('end', () => { try { resolve(JSON.parse(data)); } catch(e) { reject(new Error('Invalid JSON')); } });
+        res.on('end', () => {
+          console.log(`${hostname} status=${res.statusCode} body_start=${data.slice(0,120)}`);
+          try { resolve(JSON.parse(data)); } catch(e) { reject(new Error(`Invalid JSON (status ${res.statusCode})`)); }
+        });
       }
     );
     req.on('error', reject);
