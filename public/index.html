@@ -184,29 +184,29 @@ header p {
   background: #050508;
   border: 1px solid var(--border);
   border-radius: 12px;
-  height: 140px;
+  height: 268px;
   overflow: hidden;
   position: relative;
 }
 .slot-window::before,
 .slot-window::after {
-  content: ''; position: absolute; left: 0; right: 0; height: 46px; z-index: 2; pointer-events: none;
+  content: ''; position: absolute; left: 0; right: 0; height: 80px; z-index: 2; pointer-events: none;
 }
-.slot-window::before { top: 0; background: linear-gradient(to bottom,#050508,transparent); }
-.slot-window::after  { bottom: 0; background: linear-gradient(to top,#050508,transparent); }
+.slot-window::before { top: 0; background: linear-gradient(to bottom,#050508 30%,transparent); }
+.slot-window::after  { bottom: 0; background: linear-gradient(to top,#050508 30%,transparent); }
 .slot-highlight {
   position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
   height: 52px;
-  border-top: 1px solid rgba(240,192,64,0.25);
-  border-bottom: 1px solid rgba(240,192,64,0.25);
-  background: rgba(240,192,64,0.03);
+  border-top: 1px solid rgba(240,192,64,0.3);
+  border-bottom: 1px solid rgba(240,192,64,0.3);
+  background: rgba(240,192,64,0.04);
   z-index: 1; pointer-events: none;
 }
 .slot-reel {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 44px 0.75rem;
+  padding: 108px 0.75rem;
   will-change: transform;
 }
 .slot-item {
@@ -749,40 +749,43 @@ const COLORS = [
 ];
 
 // ══════════════════════════════════════════════
-//  PERSISTENCE
+//  PERSISTENCE — server-side, shared across all users/devices
 // ══════════════════════════════════════════════
-const STORAGE_KEY = 'lounashyrra_v3';
+const STORAGE_KEY = 'lounashyrra_excl_v3'; // localStorage only for excluded (per-user)
 
-function save() {
+async function save() {
+  // Excluded stays local (per-user preference)
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...excluded])); } catch(e) {}
+  // Folders saved to server (shared)
   try {
-    const data = {
-      excluded: [...excluded],
-      folders: folders.map(f => ({ id:f.id, name:f.name, icon:f.icon, items:[...f.items] }))
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch(e){ console.warn('Save failed', e); }
+    await fetch('/api/folders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(folders.map(f => ({ id:f.id, name:f.name, icon:f.icon, items:[...f.items] })))
+    });
+  } catch(e) { console.warn('Folder save failed', e); }
 }
 
-function load() {
+async function load() {
+  // Load excluded from localStorage
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if(raw) {
-      const data = JSON.parse(raw);
-      excluded = new Set(data.excluded || []);
-      folders = (data.folders || []).map(f => ({ ...f, items: new Set(f.items || []) }));
+    if (raw) excluded = new Set(JSON.parse(raw));
+  } catch(e) {}
+  // Load folders from server
+  try {
+    const resp = await fetch('/api/folders');
+    const data = await resp.json();
+    if (Array.isArray(data) && data.length > 0) {
+      folders = data.map(f => ({ ...f, items: new Set(f.items || []) }));
     }
-  } catch(e){ console.warn('Load failed', e); }
-  if(folders.length === 0) {
+  } catch(e) { console.warn('Folder load failed', e); }
+  if (folders.length === 0) {
     folders.push({ id: uid(), name: 'Omat suosikit', icon: '⭐', items: new Set() });
     save();
   }
   activeFolderId = folders[0].id;
 }
-
-// Sync across tabs
-window.addEventListener('storage', e => {
-  if(e.key === STORAGE_KEY) { load(); renderAll(); }
-});
 
 function uid() { return Math.random().toString(36).slice(2,9); }
 
@@ -872,11 +875,32 @@ function updateStatus() {
 // ══════════════════════════════════════════════
 //  RENDER
 // ══════════════════════════════════════════════
+function renderIdleReel() {
+  if(isSpinning) return;
+  const reel = document.getElementById('slotReel');
+  const pool = getPool();
+  if(pool.length === 0) {
+    reel.style.transition = 'none';
+    reel.style.transform = 'translateY(0)';
+    reel.innerHTML = `<div class="slot-item" style="color:var(--muted)"><span class="emoji">🍽️</span>Ei ravintoloita valittuna</div>`;
+    return;
+  }
+  // Show up to 5 random restaurants from pool in idle state
+  const sample = [...pool].sort(() => Math.random() - 0.5).slice(0, 5);
+  reel.style.transition = 'none';
+  reel.style.transform = 'translateY(0)';
+  reel.innerHTML = sample.map((r, i) => {
+    const c = COLORS[i % COLORS.length];
+    return `<div class="slot-item" style="background:${c.bg};color:${c.color}"><span class="emoji">🍽️</span>${escHtml(r.name)}</div>`;
+  }).join('');
+}
+
 function renderAll() {
   renderAllList();
   renderFolderTabs();
   renderFavList();
   renderFilterChips();
+  renderIdleReel();
   updateStatus();
 }
 
@@ -971,20 +995,20 @@ document.addEventListener('click', () => {
   document.getElementById('dropdown').style.display = 'none';
 });
 
-function toggleFolderItem(folderId, rid) {
+async function toggleFolderItem(folderId, rid) {
   const folder = folders.find(f=>f.id===folderId);
   if(!folder) return;
   if(folder.items.has(rid)) { folder.items.delete(rid); showToast(`Poistettu kansiosta "${folder.name}"`); }
   else { folder.items.add(rid); showToast(`Lisätty kansioon ${folder.icon} ${folder.name}`); }
   document.getElementById('dropdown').style.display = 'none';
-  save(); renderAll();
+  await save(); renderAll();
 }
 
-function removeFromFolder(rid) {
+async function removeFromFolder(rid) {
   const folder = folders.find(f=>f.id===activeFolderId);
   if(!folder) return;
   folder.items.delete(rid);
-  save(); renderAll();
+  await save(); renderAll();
   showToast('Poistettu kansiosta');
 }
 
@@ -1029,7 +1053,7 @@ function pickEmoji(e) {
 
 function closeModal() { document.getElementById('folderModal').classList.remove('open'); }
 
-function saveFolder() {
+async function saveFolder() {
   const name = document.getElementById('folderNameInput').value.trim();
   if(!name) { document.getElementById('folderNameInput').focus(); return; }
   if(modalMode === 'add') {
@@ -1042,14 +1066,14 @@ function saveFolder() {
     if(folder) { folder.name = name; folder.icon = selectedEmoji; }
     showToast('Kansio päivitetty');
   }
-  closeModal(); save(); renderAll();
+  closeModal(); await save(); renderAll();
 }
 
-function deleteFolder(id) {
+async function deleteFolder(id) {
   if(!confirm('Poistetaanko kansio? Ravintolat eivät poistu.')) return;
   folders = folders.filter(f=>f.id!==id);
   if(activeFolderId===id) activeFolderId = folders[0]?.id || null;
-  save(); renderAll();
+  await save(); renderAll();
 }
 
 // ══════════════════════════════════════════════
@@ -1102,10 +1126,9 @@ async function spin() {
 
   await new Promise(res=>setTimeout(res,60));
 
-  // Scroll so last item lands in center
-  // Center of slot-window = 70px from top; item center = 44 + idx*52 + 22
+  // Window height 268px, center = 134px. Item center = padding(108) + idx*52 + 22
   const targetIdx = items.length - 1;
-  const targetY = -(44 + targetIdx * ITEM_H + 22 - 70);
+  const targetY = -(108 + targetIdx * ITEM_H + 22 - 134);
   reel.style.transition = 'transform 6s cubic-bezier(0.08,0.6,0.2,1)';
   reel.style.transform = `translateY(${targetY}px)`;
 
@@ -1315,11 +1338,13 @@ document.getElementById('folderModal').addEventListener('click', e=>{
 // ══════════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════════
-load();
-renderFolderTabs();
-renderFavList();
-renderFilterChips();
-loadRestaurants();
+(async () => {
+  await load();
+  renderFolderTabs();
+  renderFavList();
+  renderFilterChips();
+  loadRestaurants();
+})();
 </script>
 </body>
 </html>
