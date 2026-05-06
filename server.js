@@ -7,21 +7,58 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ── Turso database ──
+if (!process.env.TURSO_URL || !process.env.TURSO_TOKEN) {
+  console.error('ERROR: TURSO_URL and TURSO_TOKEN environment variables are required.');
+  console.error('Set them in Render dashboard → Environment tab.');
+  process.exit(1);
+}
+
 const db = createClient({
   url: process.env.TURSO_URL,
   authToken: process.env.TURSO_TOKEN,
 });
 
 async function initDb() {
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS folders (
+  await db.batch([
+    { sql: `CREATE TABLE IF NOT EXISTS folders (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       icon TEXT NOT NULL,
       items TEXT NOT NULL DEFAULT '[]'
-    )
-  `);
+    )`, args: [] },
+    { sql: `CREATE TABLE IF NOT EXISTS cache (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )`, args: [] },
+  ]);
   console.log('DB ready');
+}
+
+// ── In-memory restaurant cache (survives multiple requests, resets on redeploy) ──
+let restaurantCache = null;
+
+async function fetchFromOverpass() {
+  const lat = 60.1709001, lon = 24.946298, radius = 500;
+  const query = `[out:json][timeout:25];(node["amenity"="restaurant"](around:${radius},${lat},${lon});way["amenity"="restaurant"](around:${radius},${lat},${lon});node["amenity"="fast_food"](around:${radius},${lat},${lon}););out center;`;
+  const body = `data=${encodeURIComponent(query)}`;
+  const mirrors = [
+    { hostname: 'overpass-api.de',           urlPath: '/api/interpreter' },
+    { hostname: 'overpass.kumi.systems',      urlPath: '/api/interpreter' },
+    { hostname: 'overpass.private.coffee',    urlPath: '/api/interpreter' },
+    { hostname: 'maps.mail.ru',               urlPath: '/osm/tools/overpass/api/interpreter' },
+  ];
+  for (const m of mirrors) {
+    try {
+      console.log(`Trying ${m.hostname}...`);
+      const json = await httpsPost(m.hostname, m.urlPath, body);
+      if (json.elements && json.elements.length > 0) {
+        console.log(`Success: ${json.elements.length} elements from ${m.hostname}`);
+        return json;
+      }
+    } catch(e) { console.error(`${m.hostname} failed:`, e.message); }
+  }
+  return null;
 }
 
 // ── HTTPS helpers ──
@@ -101,22 +138,55 @@ app.post('/api/folders', async (req, res) => {
   }
 });
 
-// ── Overpass proxy ──
+// ── Overpass proxy with DB cache fallback ──
 app.get('/api/restaurants', async (req, res) => {
-  const lat = 60.1709001, lon = 24.946298, radius = 500;
-  const query = `[out:json][timeout:25];(node["amenity"="restaurant"](around:${radius},${lat},${lon});way["amenity"="restaurant"](around:${radius},${lat},${lon});node["amenity"="fast_food"](around:${radius},${lat},${lon}););out center;`;
-  const body = `data=${encodeURIComponent(query)}`;
-  const mirrors = [
-    { hostname: 'overpass-api.de',      urlPath: '/api/interpreter' },
-    { hostname: 'overpass.kumi.systems', urlPath: '/api/interpreter' },
-  ];
-  for (const m of mirrors) {
-    try {
-      const json = await httpsPost(m.hostname, m.urlPath, body);
-      if (json.elements) return res.json(json);
-    } catch(e) { console.error(`${m.hostname} failed:`, e.message); }
+  // 1. Return in-memory cache if available
+  if (restaurantCache) {
+    console.log('Serving from memory cache');
+    return res.json(restaurantCache);
   }
-  res.status(502).json({ error: 'All Overpass mirrors failed' });
+
+  // 2. Try to fetch live from Overpass
+  const fresh = await fetchFromOverpass();
+  if (fresh) {
+    restaurantCache = fresh;
+    // Save to DB cache for future cold starts
+    try {
+      await db.execute({
+        sql: `INSERT OR REPLACE INTO cache (key, value, updated_at) VALUES ('restaurants', ?, ?)`,
+        args: [JSON.stringify(fresh), new Date().toISOString()]
+      });
+    } catch(e) { console.error('Cache save failed:', e.message); }
+    return res.json(fresh);
+  }
+
+  // 3. Fall back to DB cache
+  try {
+    const row = await db.execute({ sql: `SELECT value, updated_at FROM cache WHERE key = 'restaurants'`, args: [] });
+    if (row.rows.length > 0) {
+      console.log(`Serving DB cache from ${row.rows[0].updated_at}`);
+      return res.json(JSON.parse(row.rows[0].value));
+    }
+  } catch(e) { console.error('DB cache read failed:', e.message); }
+
+  res.status(502).json({ error: 'All Overpass mirrors failed and no cache available' });
+});
+
+// Manual refresh endpoint — call this once to populate the cache
+app.get('/api/restaurants/refresh', async (req, res) => {
+  restaurantCache = null;
+  const fresh = await fetchFromOverpass();
+  if (fresh) {
+    restaurantCache = fresh;
+    try {
+      await db.execute({
+        sql: `INSERT OR REPLACE INTO cache (key, value, updated_at) VALUES ('restaurants', ?, ?)`,
+        args: [JSON.stringify(fresh), new Date().toISOString()]
+      });
+      return res.json({ ok: true, elements: fresh.elements.length });
+    } catch(e) { return res.status(500).json({ error: e.message }); }
+  }
+  res.status(502).json({ error: 'All mirrors failed' });
 });
 
 // ── Walking route proxy ──
