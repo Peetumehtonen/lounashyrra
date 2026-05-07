@@ -6,17 +6,26 @@ const { createClient } = require('@libsql/client');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ── Turso database ──
+// ── Database (Turso or local SQLite) ──
+let db;
 if (!process.env.TURSO_URL || !process.env.TURSO_TOKEN) {
   console.error('ERROR: TURSO_URL and TURSO_TOKEN environment variables are required.');
   console.error('Set them in Render dashboard → Environment tab.');
   process.exit(1);
 }
 
-const db = createClient({
-  url: process.env.TURSO_URL,
-  authToken: process.env.TURSO_TOKEN,
-});
+if (process.env.TURSO_URL && process.env.TURSO_TOKEN) {
+console.log('Using turso')
+  db = createClient ({
+    url:process.env.TURSO_URL,
+    authToken:process.env.TURSO_TOKEN,
+  });
+} else {
+  console.log('no turso env variables se - reverting to local SQLite');
+  db = createClient({
+    url: 'file:./data/lounashyrra.db',
+  });
+}
 
 async function initDb() {
   await db.batch([
