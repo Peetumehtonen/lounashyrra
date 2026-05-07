@@ -8,11 +8,6 @@ const PORT = process.env.PORT || 3000;
 
 // ── Database (Turso or local SQLite) ──
 let db;
-if (!process.env.TURSO_URL || !process.env.TURSO_TOKEN) {
-  console.error('ERROR: TURSO_URL and TURSO_TOKEN environment variables are required.');
-  console.error('Set them in Render dashboard → Environment tab.');
-  process.exit(1);
-}
 
 if (process.env.TURSO_URL && process.env.TURSO_TOKEN) {
 console.log('Using turso')
