@@ -5,6 +5,7 @@ const { createClient } = require('@libsql/client');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const BASE = '/lounashyrra';
 
 // ── Database (Turso or local SQLite) ──
 let db;
@@ -106,16 +107,16 @@ function httpsGet(url) {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/', (req, res) => {
+app.get(BASE + '/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.get('/api/health', (req, res) => {
+app.get(BASE + '/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
 // ── Folders API ──
-app.get('/api/folders', async (req, res) => {
+app.get(BASE + '/api/folders', async (req, res) => {
   try {
     const result = await db.execute('SELECT id, name, icon, items FROM folders ORDER BY rowid ASC');
     const folders = result.rows.map(r => ({
@@ -131,7 +132,7 @@ app.get('/api/folders', async (req, res) => {
   }
 });
 
-app.post('/api/folders', async (req, res) => {
+app.post(BASE + '/api/folders', async (req, res) => {
   const folders = req.body;
   if (!Array.isArray(folders)) return res.status(400).json({ error: 'Expected array' });
   try {
@@ -151,7 +152,7 @@ app.post('/api/folders', async (req, res) => {
 });
 
 // ── Overpass proxy with DB cache fallback ──
-app.get('/api/restaurants', async (req, res) => {
+app.get(BASE + '/api/restaurants', async (req, res) => {
   // 1. Return in-memory cache if available
   if (restaurantCache) {
     console.log('Serving from memory cache');
@@ -185,7 +186,7 @@ app.get('/api/restaurants', async (req, res) => {
 });
 
 // Manual refresh endpoint — call this once to populate the cache
-app.get('/api/restaurants/refresh', async (req, res) => {
+app.get(BASE + '/api/restaurants/refresh', async (req, res) => {
   restaurantCache = null;
   const fresh = await fetchFromOverpass();
   if (fresh) {
@@ -202,7 +203,7 @@ app.get('/api/restaurants/refresh', async (req, res) => {
 });
 
 // ── Walking route proxy ──
-app.get('/api/route', async (req, res) => {
+app.get(BASE + '/api/route', async (req, res) => {
   const { fromLat, fromLon, toLat, toLon } = req.query;
   if (!fromLat || !fromLon || !toLat || !toLon) return res.status(400).json({ error: 'Missing params' });
   const url = `https://routing.openstreetmap.de/routed-foot/route/v1/foot/${fromLon},${fromLat};${toLon},${toLat}?overview=full&geometries=geojson`;

@@ -764,7 +764,7 @@ async function save() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify([...excluded])); } catch(e) {}
   // Folders saved to server (shared)
   try {
-    await fetch('/api/folders', {
+    await fetch('/lounashyrra/api/folders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(folders.map(f => ({ id:f.id, name:f.name, icon:f.icon, items:[...f.items] })))
@@ -780,7 +780,7 @@ async function load() {
   } catch(e) {}
   // Load folders from server
   try {
-    const resp = await fetch('/api/folders');
+    const resp = await fetch('/lounashyrra/api/folders');
     const data = await resp.json();
     if (Array.isArray(data) && data.length > 0) {
       folders = data.map(f => ({ ...f, items: new Set(f.items || []) }));
@@ -807,7 +807,7 @@ async function loadRestaurants() {
   closeResultModal();
 
   try {
-    const resp = await fetch('/api/restaurants', { signal: AbortSignal.timeout(25000) });
+    const resp = await fetch('/lounashyrra/api/restaurants', { signal: AbortSignal.timeout(25000) });
     if (!resp.ok) throw new Error('API error');
     const data = await resp.json();
 

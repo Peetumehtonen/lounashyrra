@@ -1,0 +1,5 @@
+node_modules/
+.devcontainer/
+.env
+lounashyrra.db
+package-lock.json
