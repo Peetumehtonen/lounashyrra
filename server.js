@@ -132,6 +132,12 @@ app.get(BASE + '/api/folders', async (req, res) => {
   }
 });
 
+// Redirect /lounashyrra to /lounashyrra/
+app.get('/lounashyrra', (req, res) => {
+  res.redirect(301, '/lounashyrra/');
+});
+
+
 app.post(BASE + '/api/folders', async (req, res) => {
   const folders = req.body;
   if (!Array.isArray(folders)) return res.status(400).json({ error: 'Expected array' });
