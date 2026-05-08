@@ -5,7 +5,7 @@ const { createClient } = require('@libsql/client');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const BASE = '/lounashyrra';
+const BASE = "";
 
 // ── Database (Turso or local SQLite) ──
 let db;
@@ -105,7 +105,7 @@ function httpsGet(url) {
 }
 
 app.use(express.json());
-app.use(BASE, express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public')));
 
 app.get(BASE + '/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
